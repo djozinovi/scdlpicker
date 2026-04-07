@@ -462,10 +462,11 @@ def readRepickerResults(path):
         # use the other picks e.g. as depth phases.
 
         for p in yaml.safe_load(yamlfile):
-            pickID = p["publicID"]
-            if seiscomp.datamodel.Pick.Find(pickID):
-                seiscomp.logging.debug("FIXME: "+pickID)
+            yamlPickID = p["publicID"]
+            if seiscomp.datamodel.Pick.Find(yamlPickID):
+                seiscomp.logging.debug("FIXME: "+yamlPickID)
             time = seiscomp.core.Time.FromString(p["time"], "%FT%T.%fZ")
+            
             tq = seiscomp.datamodel.TimeQuantity()
             tq.setValue(time)
             net = p["networkCode"]
@@ -474,6 +475,8 @@ def readRepickerResults(path):
             cha = p["channelCode"]
             if len(cha) == 2:
                 cha += "Z"
+            phaseType = p["phaseHint"]
+            
             wfid = seiscomp.datamodel.WaveformStreamID()
             wfid.setNetworkCode(net)
             wfid.setStationCode(sta)
@@ -481,19 +484,27 @@ def readRepickerResults(path):
             wfid.setChannelCode(cha)
 
             model = p["model"].lower()
-            if model in ["eqt", "eqtransformer"]:
-                mth = "EQT"
-            elif model in ["phn", "phasenet"]:
-                mth = "PHN"
-            else:
-                mth = "XYZ"
+            # if model in ["eqt", "eqtransformer"]:
+            #     mth = "EQT"
+            # elif model in ["phn", "phasenet"]:
+            #     mth = "PHN"
+            # else:
+            #     mth = "XYZ"
+            mth = model + '_' + phaseType
+            
+            
             decimals = 2
             nslcstr = net + "." + sta + "." + loc + "." + cha[:2]
             timestr = time.toString("%Y%m%d.%H%M%S.%f000000")[:16+decimals]
-            pickID = timestr + "-" + mth + "-" + nslcstr
+            pickID = timestr + "-" + nslcstr + "-" + mth
             pick = seiscomp.datamodel.Pick(pickID)
             pick.setTime(tq)
             pick.setWaveformID(wfid)
+
+            phase = seiscomp.datamodel.Phase()
+            phase.setCode(phaseType)
+            pick.setPhaseHint(phase)
+
 
             comments = []
 
@@ -521,9 +532,6 @@ def readRepickerResults(path):
         for pickID in picks:
             pick = picks[pickID]
             pick.setMethodID("DL")
-            phase = seiscomp.datamodel.Phase()
-            phase.setCode("P")
-            pick.setPhaseHint(phase)
             pick.setEvaluationMode(seiscomp.datamodel.AUTOMATIC)
 
     return picks, comms

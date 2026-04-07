@@ -72,7 +72,10 @@ class PickingConfig:
         self.repickManualPicks = False
 
         self.minConfidence = 0.4
-
+        
+        self.pickSphase = True
+    
+        
         self.batchSize = 1
 
         # The SeisComP messaging group the created picks will be sent to
@@ -218,6 +221,11 @@ def getPickingConfig(app):
         pass
     try:
         config.minConfidence = app.commandline().optionDouble("min-confidence")
+    except RuntimeError:
+        pass
+
+    try:
+        config.pickSphase = app.configGetBool("scdlpicker.picking.pickSphase")
     except RuntimeError:
         pass
 
