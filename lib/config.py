@@ -73,6 +73,14 @@ class PickingConfig:
 
         self.minConfidence = 0.4
         
+        self.mapConfidenceToUncertainty = True
+        self.confidenceUncertaintyBins = [
+            (0.9, 0.025),
+            (0.7, 0.05),
+            (0.5, 0.1),
+            (0.0, 0.2),
+        ]
+        
         self.pickSphase = True
     
         
@@ -228,6 +236,13 @@ def getPickingConfig(app):
         config.pickSphase = app.configGetBool("scdlpicker.picking.pickSphase")
     except RuntimeError:
         pass
+
+    try:
+        config.mapConfidenceToUncertainty = app.configGetBool("scdlpicker.picking.mapConfidenceToUncertainty")
+    except RuntimeError:
+        pass
+
+
 
     try:
         config.beforeP = app.configGetDouble("scdlpicker.repicking.beforeP")
