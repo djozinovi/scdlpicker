@@ -538,6 +538,12 @@ def readRepickerResults(path, pickingConfig):
             phase.setCode(phaseType)
             pick.setPhaseHint(phase)
 
+            polarity = p.get("polarity")
+            if phaseType[0].upper() == 'P' and polarity is not None:
+                if polarity in [0,1,2]:
+                    pick.setPolarity(polarity)
+
+
 
             comments = []
 
@@ -552,6 +558,15 @@ def readRepickerResults(path, pickingConfig):
             comment.setText("%.3f" % p["confidence"])
             comment.setId("confidence")
             comments.append(comment)
+
+            
+            polarityConf = p.get("polarityConfidence")
+            if polarityConf is not None:
+                commentPol = seiscomp.datamodel.Comment()
+                commentPol.setText("%.3f" % polarityConf)
+                commentPol.setId("Polarity confidence")
+                comments.append(commentPol)
+
 
             if pickID in picks:
                 # only override existing pick with higher

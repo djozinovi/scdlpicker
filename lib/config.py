@@ -83,6 +83,15 @@ class PickingConfig:
         
         self.pickSphase = True
     
+        # polarity picking config
+        self.polarityEnabled = True
+        self.polarityWindowBeforeP = 2 # seconds before P pick
+        self.polarityWindowAfterP = 2 # seconds after P pick
+        # Path to the trained polarity model. 
+        # This should be adapted to the actual location of the model in your filesystem.
+        # The default is just a placeholder and will not work out of the box.
+        self.polarityModelPath = "/home/sysop/scdlpicker1/models/polarity_model.pt" 
+        self.polaritySamplingRate = 100 # Sampling rate for polarity picking
         
         self.batchSize = 1
 
@@ -180,8 +189,6 @@ def getCommonConfig(app):
     except RuntimeError:
         pass
 
-    # stationBlacklist
-
     try:
         config.stationBlacklist = app.configGetStrings("scdlpicker.stationBlacklist")
     except RuntimeError:
@@ -264,6 +271,33 @@ def getPickingConfig(app):
     except RuntimeError:
         pass
 
+    try:
+        config.polarityEnabled = app.configGetBool("scdlpicker.polarity.enabled")
+    except RuntimeError:
+        pass
+
+    try:
+        config.polarityWindowBeforeP = app.configGetDouble("scdlpicker.polarity.windowBeforeP")
+    except RuntimeError:
+        pass
+
+    try:
+        config.polarityWindowAfterP = app.configGetDouble("scdlpicker.polarity.windowAfterP")
+    except RuntimeError:
+        pass
+
+    try:
+        model_path = app.configGetString("scdlpicker.polarity.modelPath")
+        config.polarityModelPath = str(pathlib.Path(model_path).expanduser())
+    except RuntimeError:
+        pass
+
+    try:
+        config.polaritySamplingRate = app.configGetInt("scdlpicker.polarity.samplingRate")
+    except RuntimeError:
+        pass
+
+
     return config
 
 
@@ -307,7 +341,7 @@ def getRelocationConfig(app):
         pass
 
     try:
-        config.pickAuthors = app.configGetDouble("scdlpicker.relocation.pickAuthors")
+        config.pickAuthors = app.configGetString("scdlpicker.relocation.pickAuthors")
     except RuntimeError:
         pass
     try:

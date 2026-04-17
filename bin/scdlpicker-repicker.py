@@ -164,6 +164,20 @@ class App(seiscomp.client.Application):
         self.expected_input_length_sec = \
             self.model.in_samples / self.model.sampling_rate
 
+
+
+        # Load the polarity model if polarity picking is enabled
+        self.polarityModel = None
+        self.torch = None
+        if self.pickingConfig.polarityEnabled:
+            import torch
+            self.torch = torch
+            self.polarityModel = torch.jit.load(self.pickingConfig.polarityModelPath,
+                                           map_location=torch.device('cpu'))
+            self.polarityModel.eval()
+
+
+
         return True
 
     def dumpConfiguration(self):
@@ -329,7 +343,7 @@ class App(seiscomp.client.Application):
             
             triggering_pick = workspace.picks[triggerID]
 
-            for (ml_time, ml_conf) in preds:
+            for (ml_time, ml_conf, ml_polarity, ml_polarityConfidence) in preds:
                 seiscomp.logging.info("PICK   %s" % pick_id)
                 seiscomp.logging.info("RESULT %s  c= %.2f" %
                             (timestamp(ml_time), ml_conf))
@@ -354,6 +368,8 @@ class App(seiscomp.client.Application):
                 new_pick.confidence = float("%.3f" % ml_conf)
                 new_pick.time = timestamp(ml_time)
                 new_pick.phaseHint = phaseType
+                new_pick.polarity = ml_polarity
+                new_pick.polarityConfidence = float("%.3f" % ml_polarityConfidence)
 
 
                 workspace.mlpicks[pick_id] = new_pick
@@ -491,8 +507,59 @@ class App(seiscomp.client.Application):
 
         return True
 
+    def polarity_preprocessing(self, stream):
+        # Detrend and demean the trace, as expected by the polarity model
+        # This is model specific and should be adapted if a different model is used.
+        stream = stream.resample(100)
+        stream = stream.detrend('demean').detrend('linear')
+        stream = stream.taper(0.05)
+        stream = stream.filter('bandpass', freqmin=1, freqmax=30)
+        return stream
 
-    def process_one_annotation (self, phaseType, annotation, annotDir, predictions, pick, peakHeight):
+
+    def pickPolarity(self, picktime, stationTraces):
+        beforeP = self.pickingConfig.polarityWindowBeforeP
+        afterP = self.pickingConfig.polarityWindowAfterP
+        samplingRate = self.pickingConfig.polaritySamplingRate
+        
+        
+        verticalTrace = stationTraces.copy().select(channel="*Z")
+        verticalTrace = verticalTrace.slice(picktime - beforeP, 
+                                            picktime + afterP)    
+        
+        if len(verticalTrace) == 0:
+            polarity, polarity_confidence = None, 999
+            return polarity, polarity_confidence
+        else:
+            verticalTrace = verticalTrace[0]
+        
+        verticalTrace = verticalTrace.resample(samplingRate)
+        
+        totalWindowLength = int(samplingRate*(beforeP + 
+                                        afterP))
+        
+        verticalArray = verticalTrace.data[:totalWindowLength]
+        
+        if len(verticalArray) < totalWindowLength:
+            polarity, polarity_confidence = None, 999
+        else:
+            polarity, polarity_confidence = self.first_motion_determination(verticalArray)
+            
+        return polarity, polarity_confidence
+
+    def first_motion_determination(self, array):
+        # Normalize the trace data to be between -1 and 1 as expected by the polarity model
+        arrayMax = np.max(np.abs(array)) + 1e-6 # add a small value to avoid division by zero
+        array = array/arrayMax
+        
+        prediction = self.polarityModel(self.torch.tensor(array).unsqueeze(0).unsqueeze(0).float())
+        predictionInt = self.torch.argmax(prediction).item()
+        softmaxPreds = self.torch.nn.Softmax(dim=1)(prediction)
+        predictionMaxValue = self.torch.max(softmaxPreds, dim=1).values.item()
+        return predictionInt, predictionMaxValue
+    
+
+    def process_one_annotation (self, phaseType, annotation, annotDir, predictions, pick, peakHeight, stationTraces=None):
         annot_f = annotDir / (dotted_nslc(pick) + "_" + phaseType + ".sac")
         annotation.write(str(annot_f), format="SAC")
 
@@ -509,7 +576,15 @@ class App(seiscomp.client.Application):
             picktime = annotation.stats.starttime + times[peak]
             if pickID not in predictions:
                 predictions[pickID] = []
-            new_item = (picktime, confidence[peak])
+                
+            ##### Polarity picking    
+            if stationTraces is not None:
+                polarity, polarity_confidence = self.pickPolarity(picktime, stationTraces)
+            else:
+                polarity, polarity_confidence = None, 999
+            
+            #### Creating pick item
+            new_item = (picktime, confidence[peak], polarity, polarity_confidence)
             predictions[pickID].append(new_item)
             seiscomp.logging.debug(
                 "#### " + pickID + "  %.3f" % confidence[peak])
@@ -577,8 +652,19 @@ class App(seiscomp.client.Application):
 
                 assoc_ind.append(i)
 
-                predictions = self.process_one_annotation("P", annotationP, annotDir, predictions, pick, self.pickingConfig.minConfidence)
-                
+                # If polarity picking is enabled, we get the traces of the station for which we want to do the picking and pass them to the
+                # process_one_annotation function, which will then call the polarity model and add the polarity information to the predictions. 
+                # If polarity picking is not enabled, we just pass None and the process_one_annotation function will skip the polarity picking
+                # and just return the predictions without polarity information.
+                if self.pickingConfig.polarityEnabled:
+                    stationTraces = stream.copy().select(network=annotation.meta.network, station=annotation.meta.station)
+                    stationTraces = self.polarity_preprocessing(stationTraces)
+
+                else:
+                    stationTraces = None
+
+                predictions = self.process_one_annotation("P", annotationP, annotDir, predictions, pick, self.pickingConfig.minConfidence, stationTraces)
+
                 # If we have S annotations, we process them as well. This can be configured in the config file.
                 if self.pickingConfig.pickSphase == True:
                     if len(annotationsS) > 0:
@@ -608,10 +694,10 @@ class App(seiscomp.client.Application):
     def _ml_predict(self, adhoc_picks, eventID):
         """
         Based on a list of picks, perform repicking and fill a dict with
-        the predictions, each a (Time, confidence) pair, and returns it.
+        the predictions, each a (Time, confidence, polarity, polarityConfidence) pair, and returns it.
 
         Returns:
-            dict: a dictionary of `pickID: (time, confidence)` pairs
+            dict: a dictionary of `pickID: (time, confidence, polarity, polarityConfidence)` pairs
         """
 
         seiscomp.logging.debug("Starting prediction")
