@@ -68,6 +68,7 @@ def dotted_nslc(pick):
 
 
 def timestamp(t):
+    # Use strftime to always include fractional seconds and avoid malformed timestamps (e.g. when the fractions of second are zero).
     return t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:23] + 'Z'
 
 
