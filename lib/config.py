@@ -71,8 +71,12 @@ class PickingConfig:
         # Repick manual picks? This is normally not needed but may be activated to e.g. compare picking performance.
         self.repickManualPicks = False
 
-        self.minConfidence = 0.4
+        self.minConfidenceP = 0.4
+        self.minConfidenceS = 0.4
 
+        self.pickSphase = True
+    
+        
         self.batchSize = 1
 
         # The SeisComP messaging group the created picks will be sent to
@@ -89,7 +93,8 @@ class PickingConfig:
         out("  repickManualPicks = " + str(self.repickManualPicks))
         out("  modelName = " + str(self.modelName))
         out("  dataset = " + str(self.dataset))
-        out("  minConfidence = " + str(self.minConfidence))
+        out("  minConfidenceP = " + str(self.minConfidenceP))
+        out("  minConfidenceS = " + str(self.minConfidenceS))
         out("  batchSize = " + str(self.batchSize))
         out("  targetMessagingGroup = " + str(self.targetMessagingGroup))
         out("  pickAuthor = " + str(self.pickAuthor))
@@ -213,11 +218,25 @@ def getPickingConfig(app):
 
 
     try:
-        config.minConfidence = app.configGetDouble("scdlpicker.picking.minConfidence")
+        config.minConfidenceP = app.configGetDouble("scdlpicker.picking.minConfidenceP")
     except RuntimeError:
         pass
     try:
-        config.minConfidence = app.commandline().optionDouble("min-confidence")
+        config.minConfidenceP = app.commandline().optionDouble("min-confidence-p")
+    except RuntimeError:
+        pass
+
+    try:
+        config.pickSphase = app.configGetBool("scdlpicker.picking.pickSphase")
+    except RuntimeError:
+        pass
+
+    try:
+        config.minConfidenceS = app.configGetDouble("scdlpicker.picking.minConfidenceS")
+    except RuntimeError:
+        pass
+    try:
+        config.minConfidenceS = app.commandline().optionDouble("min-confidence-s")
     except RuntimeError:
         pass
 

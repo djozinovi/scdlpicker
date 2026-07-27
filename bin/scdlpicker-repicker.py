@@ -68,7 +68,8 @@ def dotted_nslc(pick):
 
 
 def timestamp(t):
-    return (t.isoformat() + "000000")[:23] + "Z"
+    # Use strftime to always include fractional seconds and avoid malformed timestamps (e.g. when the fractions of second are zero).
+    return t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:23] + 'Z'
 
 
 class App(seiscomp.client.Application):
@@ -125,7 +126,9 @@ class App(seiscomp.client.Application):
         self.commandline().addStringOption(
             "Config", "batch-size", "Set batch size. Should be suitable for the hardware used [50]")
         self.commandline().addStringOption(
-            "Config", "min-confidence", "Confidence threshold below which a pick is skipped")
+            "Config", "min-confidence-p", "Confidence threshold below which a P pick is skipped")
+        self.commandline().addStringOption(
+            "Config", "min-confidence-s", "Confidence threshold below which an S pick is skipped")
 
         self.commandline().addGroup("Mode")
         self.commandline().addStringOption(
@@ -323,28 +326,40 @@ class App(seiscomp.client.Application):
             # the threshold, this is now a list of (time, confidence)
             # pairs.
             preds = predictions[pick_id]
-
-            triggering_pick = workspace.picks[pick_id]
+            
+            # The current pickID is the triggering pick ID + the phase type. We are separating it again.
+            triggerID, phaseType = pick_id.rsplit('_', maxsplit=1)
+            
+            triggering_pick = workspace.picks[triggerID]
 
             for (ml_time, ml_conf) in preds:
                 seiscomp.logging.info("PICK   %s" % pick_id)
                 seiscomp.logging.info("RESULT %s  c= %.2f" %
                             (timestamp(ml_time), ml_conf))
 
-                dt_max = 10
-                dt = abs(ml_time - obspy.UTCDateTime(triggering_pick.time))
-                if abs(dt) > dt_max:
-                    seiscomp.logging.info("SKIPPED dt = %.2f" % dt)
-                    continue
-                if ml_conf < self.pickingConfig.minConfidence:
+                if phaseType[0] == 'P':
+                    dt_max = 10
+                    dt = abs(ml_time - obspy.UTCDateTime(triggering_pick.time))
+                    if abs(dt) > dt_max:
+                        seiscomp.logging.info("SKIPPED dt = %.2f" % dt)
+                        continue
+                    minConfidence = self.pickingConfig.minConfidenceP
+                else:
+                    minConfidence = self.pickingConfig.minConfidenceS
+                    
+                
+                if ml_conf < minConfidence:
                     seiscomp.logging.info("SKIPPED conf = %.3f" % ml_conf)
                     continue
-                old_pick = workspace.picks[pick_id]
+                
+                old_pick = workspace.picks[triggerID]
                 new_pick = old_pick.copy()
-                new_pick.publicID = old_pick.publicID + "/repick"
+                new_pick.publicID = old_pick.publicID + "/repick/" + phaseType
                 new_pick.model = self.pickingConfig.modelName
                 new_pick.confidence = float("%.3f" % ml_conf)
                 new_pick.time = timestamp(ml_time)
+                new_pick.phaseHint = phaseType
+
 
                 workspace.mlpicks[pick_id] = new_pick
 
@@ -481,6 +496,31 @@ class App(seiscomp.client.Application):
 
         return True
 
+
+    def process_one_annotation (self, phaseType, annotation, annotDir, predictions, pick, peakHeight):
+        annot_f = annotDir / (dotted_nslc(pick) + "_" + phaseType + ".sac")
+        annotation.write(str(annot_f), format="SAC")
+
+        confidence = annotation.data.astype(np.double)
+        times = annotation.times()
+
+        pickID = str(pick.publicID) + "_" + phaseType
+
+        # The required min. distance between peaks is one second,
+        # i.e. the sampling rate controls the number of samples.
+        peaks, _ = scipy.signal.find_peaks(
+            confidence, height=peakHeight, distance=self.model.sampling_rate)
+        for peak in peaks:
+            picktime = annotation.stats.starttime + times[peak]
+            if pickID not in predictions:
+                predictions[pickID] = []
+            new_item = (picktime, confidence[peak])
+            predictions[pickID].append(new_item)
+            seiscomp.logging.debug(
+                "#### " + pickID + "  %.3f" % confidence[peak])
+        return predictions
+
+
     def fill_result(self, predictions, stream, collected_picks,
                     annotDir, eventID):
         """Fills `predictions` with annotations done by the model
@@ -494,12 +534,23 @@ class App(seiscomp.client.Application):
             annotations = self.model.annotate(stream)
 
             # Only use those predictions that were done for P wave onsets
-            annotations = list(filter(
+            annotationsP = list(filter(
                 lambda a: a.id.split('.')[-1].endswith('_P'), annotations))
+
+            
+
+            # Get S annotations if they exist. If there are no S annotations we will just get an empty list and skip the S phase picking later.
+            annotationsS = list(filter(
+                lambda a: a.id.split('.')[-1].endswith('_S'), annotations))
 
             # indexes list of successfully associated annotations
             assoc_ind = []
-            for i, annotation in enumerate(annotations):
+            
+            
+            for i, annotation in enumerate(annotationsP):
+                # We are working under the assumption that all pickers provide P picks and that S picks are optional
+                annotationP = annotationsP[i]
+                
                 try:
                     # Associate the annotation to a Pick
 
@@ -530,24 +581,14 @@ class App(seiscomp.client.Application):
                     continue
 
                 assoc_ind.append(i)
-                annot_f = annotDir / (dotted_nslc(pick) + ".sac")
-                annotation.write(str(annot_f), format="SAC")
 
-                confidence = annotation.data.astype(np.double)
-                times = annotation.times()
-
-                # The required min. distance between peaks is one second,
-                # i.e. the sampling rate controls the number of samples.
-                peaks, _ = scipy.signal.find_peaks(
-                    confidence, height=0.1, distance=self.model.sampling_rate)
-                for peak in peaks:
-                    picktime = annotation.stats.starttime + times[peak]
-                    if pick.publicID not in predictions:
-                        predictions[pick.publicID] = []
-                    new_item = (picktime, confidence[peak])
-                    predictions[pick.publicID].append(new_item)
-                    seiscomp.logging.debug(
-                        "#### " + pick.publicID + "  %.3f" % confidence[peak])
+                predictions = self.process_one_annotation("P", annotationP, annotDir, predictions, pick, self.pickingConfig.minConfidenceP)
+                
+                # If we have S annotations, we process them as well. This can be configured in the config file.
+                if self.pickingConfig.pickSphase == True:
+                    if len(annotationsS) > 0:
+                        annotationS = annotationsS[i]
+                        predictions = self.process_one_annotation("S", annotationS, annotDir, predictions, pick, self.pickingConfig.minConfidenceS)
 
                 collected_picks.remove(pick)
 

@@ -284,7 +284,9 @@ def loadPicksForOrigin(query, origin, inventory, allowedAuthorIDs, maxDelta, max
         picks.append(pick)
 
         phase = seiscomp.datamodel.Phase()
-        phase.setCode("P")
+        phaseType = pick.phaseHint().code()
+        phase.setCode(phaseType)
+
         arr = seiscomp.datamodel.Arrival()
         arr.setPhase(phase)
         arr.setPickID(pickID)
