@@ -41,9 +41,15 @@
 						</description>
 					</parameter>
 
-					<parameter name="minConfidence" type="double" default="0.4">
+					<parameter name="minConfidenceP" type="double" default="0.4">
 						<description>
-							Minimum confidence for an annotation to be declared a pick
+							Minimum confidence for a P annotation to be declared a pick.
+						</description>
+					</parameter>
+
+					<parameter name="minConfidenceS" type="double" default="0.4">
+						<description>
+							Minimum confidence for an S annotation to be declared a pick.
 						</description>
 					</parameter>
 

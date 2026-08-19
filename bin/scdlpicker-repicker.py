@@ -68,6 +68,7 @@ def dotted_nslc(pick):
 
 
 def timestamp(t):
+    # Use strftime to always include fractional seconds and avoid malformed timestamps (e.g. when the fractions of second are zero).
     return t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:23] + 'Z'
 
 
@@ -125,7 +126,9 @@ class App(seiscomp.client.Application):
         self.commandline().addStringOption(
             "Config", "batch-size", "Set batch size. Should be suitable for the hardware used [50]")
         self.commandline().addStringOption(
-            "Config", "min-confidence", "Confidence threshold below which a pick is skipped")
+            "Config", "min-confidence-p", "Confidence threshold below which a P pick is skipped")
+        self.commandline().addStringOption(
+            "Config", "min-confidence-s", "Confidence threshold below which an S pick is skipped")
 
         self.commandline().addGroup("Mode")
         self.commandline().addStringOption(
@@ -340,8 +343,10 @@ class App(seiscomp.client.Application):
                     if abs(dt) > dt_max:
                         seiscomp.logging.info("SKIPPED dt = %.2f" % dt)
                         continue
-                
-                minConfidence = self.pickingConfig.minConfidence
+                    minConfidence = self.pickingConfig.minConfidenceP
+                else:
+                    minConfidence = self.pickingConfig.minConfidenceS
+                    
                 
                 if ml_conf < minConfidence:
                     seiscomp.logging.info("SKIPPED conf = %.3f" % ml_conf)
@@ -349,7 +354,7 @@ class App(seiscomp.client.Application):
                 
                 old_pick = workspace.picks[triggerID]
                 new_pick = old_pick.copy()
-                new_pick.publicID = old_pick.publicID + "/repick_" + phaseType
+                new_pick.publicID = old_pick.publicID + "/repick/" + phaseType
                 new_pick.model = self.pickingConfig.modelName
                 new_pick.confidence = float("%.3f" % ml_conf)
                 new_pick.time = timestamp(ml_time)
@@ -577,13 +582,13 @@ class App(seiscomp.client.Application):
 
                 assoc_ind.append(i)
 
-                predictions = self.process_one_annotation("P", annotationP, annotDir, predictions, pick, self.pickingConfig.minConfidence)
+                predictions = self.process_one_annotation("P", annotationP, annotDir, predictions, pick, self.pickingConfig.minConfidenceP)
                 
                 # If we have S annotations, we process them as well. This can be configured in the config file.
                 if self.pickingConfig.pickSphase == True:
                     if len(annotationsS) > 0:
                         annotationS = annotationsS[i]
-                        predictions = self.process_one_annotation("S", annotationS, annotDir, predictions, pick, self.pickingConfig.minConfidence)
+                        predictions = self.process_one_annotation("S", annotationS, annotDir, predictions, pick, self.pickingConfig.minConfidenceS)
 
                 collected_picks.remove(pick)
 

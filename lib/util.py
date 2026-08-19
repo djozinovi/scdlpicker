@@ -523,7 +523,7 @@ def readRepickerResults(path, pickingConfig):
             #     mth = "PHN"
             # else:
             #     mth = "XYZ"
-            mth = model + '_' + phaseType
+            mth = model
             
             
             decimals = 2
