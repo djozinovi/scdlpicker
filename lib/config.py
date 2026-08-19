@@ -103,6 +103,8 @@ class PickingConfig:
         out("  dataset = " + str(self.dataset))
         out("  minConfidenceP = " + str(self.minConfidenceP))
         out("  minConfidenceS = " + str(self.minConfidenceS))
+        out("  minConfidenceP = " + str(self.minConfidenceP))
+        out("  minConfidenceS = " + str(self.minConfidenceS))
         out("  batchSize = " + str(self.batchSize))
         out("  targetMessagingGroup = " + str(self.targetMessagingGroup))
         out("  pickAuthor = " + str(self.pickAuthor))
@@ -241,9 +243,25 @@ def getPickingConfig(app):
 
     try:
         config.minConfidenceS = app.configGetDouble("scdlpicker.picking.minConfidenceS")
+        config.minConfidenceP = app.configGetDouble("scdlpicker.picking.minConfidenceP")
     except RuntimeError:
         pass
     try:
+        config.minConfidenceP = app.commandline().optionDouble("min-confidence-p")
+    except RuntimeError:
+        pass
+
+    try:
+        config.pickSphase = app.configGetBool("scdlpicker.picking.pickSphase")
+    except RuntimeError:
+        pass
+
+    try:
+        config.minConfidenceS = app.configGetDouble("scdlpicker.picking.minConfidenceS")
+    except RuntimeError:
+        pass
+    try:
+        config.minConfidenceS = app.commandline().optionDouble("min-confidence-s")
         config.minConfidenceS = app.commandline().optionDouble("min-confidence-s")
     except RuntimeError:
         pass
